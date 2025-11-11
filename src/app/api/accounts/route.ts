@@ -90,13 +90,13 @@ export async function POST(request: Request) {
         currentBalance,
         currency || null,
         status,
-        ownerId,
-        parentAccountId,
-        assetRef,
-        imgUrl,
-        notes,
-        totalIn,
-        totalOut,
+        ownerId || null,
+        parentAccountId || null,
+        assetRef || null,
+        imgUrl || null,
+        notes || null,
+        totalIn || null,
+        totalOut || null,
       ]
     );
 

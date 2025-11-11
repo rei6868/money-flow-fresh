@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { z } from 'zod';
-import { UpdateTransactionSchema } from '@/lib/validation';
+import { TransactionTypeSchema, TransactionStatusSchema } from '@/lib/validation';
+
+const UpdateTransactionBodySchema = z.object({
+    type: TransactionTypeSchema.optional(),
+    amount: z.number().positive().optional(),
+    category: z.string().optional(),
+    description: z.string().optional(),
+    status: TransactionStatusSchema.optional(),
+  });
 
 export async function GET(
     request: NextRequest,
@@ -36,7 +44,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const validation = UpdateTransactionSchema.safeParse(body);
+    const validation = UpdateTransactionBodySchema.safeParse(body);
 
     if (!validation.success) {
       return NextResponse.json({ error: 'Validation failed', details: validation.error.flatten() }, { status: 400 });
@@ -59,7 +67,7 @@ export async function PATCH(
     if (type) updateFields.push(sql`type = ${type}`);
     if (amount) updateFields.push(sql`amount = ${amount}`);
     if (category) updateFields.push(sql`category = ${category}`);
-    if (description) updateFields.push(sql`description = ${description}`);
+    if (description) updateFields.push(sql`notes = ${description}`);
     if (status) updateFields.push(sql`status = ${status}`);
 
 
