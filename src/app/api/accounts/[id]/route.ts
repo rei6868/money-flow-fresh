@@ -1,70 +1,10 @@
 import { sql } from '@/lib/db';
-import { ApiUpdateAccountSchema } from '@/lib/validation';
-import { NextRequest } from 'next/server';
 import { z } from 'zod';
+import { CreateAccountSchema } from '@/lib/validation';
+import { NextRequest } from 'next/server';
+import { Account } from '@/types/database';
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const body = await request.json();
-    const validation = ApiUpdateAccountSchema.safeParse(body);
-
-    if (!validation.success) {
-      return Response.json(
-        { error: 'Invalid request body', details: validation.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { accountName, accountType, status } = validation.data;
-
-    const updates: { [key: string]: any } = {};
-    if (accountName) updates.account_name = accountName;
-    if (accountType) updates.account_type = accountType;
-    if (status) updates.status = status;
-
-    const updateFields = Object.keys(updates);
-    if (updateFields.length === 0) {
-      return Response.json({ message: 'No fields to update' }, { status: 200 });
-    }
-
-    const setClauses = Object.entries(updates).map(
-      ([key, value]) => sql`${sql.unsafe(key)} = ${value}`
-    );
-
-    const result = await sql`
-      UPDATE accounts
-      SET ${(sql as any).join(setClauses, sql`, `)}, updated_at = NOW()
-      WHERE account_id = ${id}
-      RETURNING *
-    `;
-
-    const updatedAccount = result[0];
-
-    if (!updatedAccount) {
-      return Response.json({ error: 'Account not found' }, { status: 404 });
-    }
-
-    return Response.json({
-      accountId: id,
-      updatedFields: Object.keys(validation.data),
-      account: updatedAccount,
-    }, { status: 200 });
-
-  } catch (error) {
-    console.error(`[PATCH /api/accounts/${(await (params as any))?.id}]`, error);
-    if (error instanceof z.ZodError) {
-      return Response.json({ error: 'Validation failed', details: error.flatten() }, { status: 400 });
-    }
-    return Response.json(
-      { error: 'Failed to update account' },
-      { status: 500 }
-    );
-  }
-}
+const UpdateAccountSchema = CreateAccountSchema.partial();
 
 export async function DELETE(
   request: NextRequest,
@@ -73,38 +13,99 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    const relatedTransactionsResult = await sql`
-      SELECT COUNT(*) as count FROM transactions WHERE account_id = ${id} AND deleted_at IS NULL
+    const result = await sql`
+      SELECT * FROM accounts WHERE account_id = ${id}
     `;
-    const relatedTransactions = relatedTransactionsResult[0] as { count: string };
+    const account = result[0] as Account;
 
-    if (parseInt(relatedTransactions?.count || '0', 10) > 0) {
+
+    if (!account) {
       return Response.json(
-        { error: 'Cannot delete account with active transactions. Please reassign or delete them first.' },
-        { status: 409 } // 409 Conflict
+        { error: 'Account not found' },
+        { status: 404 }
       );
     }
 
-    const result = await sql`
-      UPDATE accounts
-      SET deleted_at = NOW(), status = 'closed'
-      WHERE account_id = ${id}
-      RETURNING account_id
+    await sql`
+      UPDATE accounts SET status = 'closed', updated_at = NOW() WHERE account_id = ${id}
     `;
 
-    if (result.length === 0) {
-        return Response.json({ error: 'Account not found or already deleted' }, { status: 404 });
-    }
-
-    return Response.json({
-      message: 'Account deleted successfully',
-      id,
-    }, { status: 200 });
+    return Response.json({ success: true, message: 'Account closed' });
 
   } catch (error) {
-    console.error(`[DELETE /api/accounts/${(await (params as any))?.id}]`, error);
+    console.error('[DELETE /api/accounts/[id]]', error);
     return Response.json(
       { error: 'Failed to delete account' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const body = await request.json();
+    const { id } = await params;
+
+    // Validate input
+    const validInput = UpdateAccountSchema.parse(body);
+
+    const oldAccountResult = await sql`
+      SELECT * FROM accounts WHERE account_id = ${id}
+    `;
+    const oldAccount = oldAccountResult[0] as Account;
+
+    if (!oldAccount) {
+      return Response.json(
+        { error: 'Account not found' },
+        { status: 404 }
+      );
+    }
+
+    const updates: { [key: string]: any } = {};
+    for (const key in validInput) {
+        if (Object.prototype.hasOwnProperty.call(validInput, key)) {
+            const value = validInput[key as keyof typeof validInput];
+            if (value !== undefined) {
+                updates[key] = value;
+            }
+        }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return Response.json(
+        { message: 'No fields to update', account: oldAccount },
+        { status: 200 }
+      );
+    }
+
+    const setClauses = Object.entries(updates).map(
+      ([key, value]) => sql`${sql.unsafe(key)} = ${value}`
+    );
+
+    const updatedAccountResult = await sql`
+      UPDATE accounts
+      SET ${(sql as any).join(setClauses, sql`, `)}, updated_at = NOW()
+      WHERE account_id = ${id}
+      RETURNING *
+    `;
+
+    const updatedAccount = updatedAccountResult[0] as Account;
+
+    return Response.json(updatedAccount);
+
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+        return Response.json(
+            { error: 'Validation failed', details: error.flatten() },
+            { status: 400 }
+        );
+    }
+    console.error('[PATCH /api/accounts/[id]]', error);
+    return Response.json(
+      { error: 'Failed to update account' },
       { status: 500 }
     );
   }

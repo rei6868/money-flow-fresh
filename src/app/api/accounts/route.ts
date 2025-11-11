@@ -1,8 +1,6 @@
 import { z } from 'zod';
 import { queryOne, queryMany } from '@/lib/db';
-import { ApiCreateAccountSchema } from '@/lib/validation';
-import { randomUUID } from 'crypto';
-import { NextRequest } from 'next/server';
+import { CreateAccountSchema } from '@/lib/validation';
 
 export async function GET(request: Request) {
   try {
@@ -42,35 +40,78 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const validation = ApiCreateAccountSchema.safeParse(body);
 
-    if (!validation.success) {
+    // 1. VALIDATE INPUT against CreateAccountSchema
+    const validInput = CreateAccountSchema.parse(body);
+
+    // 2. GENERATE account ID
+    const accountId = crypto.randomUUID();
+
+    // 3. BUILD INSERT query with plain placeholders
+    const insertQuery = `
+      INSERT INTO accounts (
+        account_id,
+        account_name,
+        img_url,
+        account_type,
+        owner_id,
+        parent_account_id,
+        asset_ref,
+        opening_balance,
+        current_balance,
+        status,
+        total_in,
+        total_out,
+        notes,
+        created_at,
+        updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()
+      )
+      RETURNING *
+    `;
+
+    // 4. PREPARE parameters with plain strings for enums
+    const params = [
+      accountId,
+      validInput.account_name,
+      validInput.img_url || null,
+      validInput.account_type, // Pass as plain string
+      validInput.owner_id || null,
+      validInput.parent_account_id || null,
+      validInput.asset_ref || null,
+      validInput.opening_balance || 0,
+      validInput.current_balance || validInput.opening_balance || 0,
+      validInput.status || 'active', // Pass as plain string
+      validInput.total_in || 0,
+      validInput.total_out || 0,
+      validInput.notes || null
+    ];
+
+    // 5. EXECUTE insert
+    const newAccount = await queryOne(insertQuery, params);
+
+    if (!newAccount) {
       return Response.json(
-        { error: 'Invalid request body', details: validation.error.flatten() },
-        { status: 400 }
+        { error: 'Failed to create account' },
+        { status: 500 }
       );
     }
 
-    const { accountName, accountType, currency, currentBalance } = validation.data;
-    const accountId = randomUUID();
-
-    const newAccount = await queryOne(
-      `INSERT INTO accounts (account_id, account_name, account_type, currency, current_balance, status)
-       VALUES ($1, $2, $3, $4, $5, 'active')
-       RETURNING account_id, account_name, account_type, current_balance, currency, status, created_at`,
-      [accountId, accountName, accountType, currency, currentBalance]
-    );
-
+    // 6. RETURN created account
     return Response.json(newAccount, { status: 201 });
 
   } catch (error) {
-    console.error('[POST /api/accounts]', error);
     if (error instanceof z.ZodError) {
-      return Response.json({ error: 'Validation failed', details: error.flatten() }, { status: 400 });
+      return Response.json(
+        { error: 'Validation failed', details: error.flatten() },
+        { status: 400 }
+      );
     }
+    console.error('[POST /api/accounts]', error);
     return Response.json(
       { error: 'Failed to create account' },
       { status: 500 }
