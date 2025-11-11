@@ -2,9 +2,12 @@
 
 import { z } from 'zod';
 
-// Enum schemas
+// Corrected Enum schemas based on database introspection
+export const AccountTypeSchema = z.enum(['bank', 'credit', 'saving', 'invest', 'e-wallet', 'group', 'loan', 'mortgage', 'cash', 'other']);
+export const AccountStatusSchema = z.enum(['active', 'inactive', 'closed', 'suspended']);
+
+// Other existing schemas
 export const PersonStatusSchema = z.enum(['active', 'inactive', 'archived']);
-export const AccountTypeSchema = z.enum(['checking', 'savings', 'credit', 'investment', 'wallet']);
 export const TransactionTypeSchema = z.enum(['expense', 'income', 'debt', 'repayment', 'cashback', 'subscription', 'import', 'adjustment']);
 export const TransactionStatusSchema = z.enum(['active', 'pending', 'void', 'canceled']);
 export const LinkedTxnTypeSchema = z.enum(['refund', 'split', 'batch', 'settle']);
@@ -30,11 +33,18 @@ export const CreatePersonSchema = z.object({
 export type CreatePersonInput = z.infer<typeof CreatePersonSchema>;
 
 export const CreateAccountSchema = z.object({
-  person_id: z.string().uuid('Invalid person ID'),
-  account_name: z.string().min(1, 'Account name required'),
+  account_name: z.string().min(1, 'Account name is required').max(120, 'Account name must be 120 characters or less'),
   account_type: AccountTypeSchema,
-  currency: z.string().default('VND'),
-  status: z.enum(['active', 'inactive', 'closed', 'suspended']).default('active'),
+  opening_balance: z.number(),
+  current_balance: z.number(),
+  status: AccountStatusSchema.default('active'),
+  owner_id: z.string().uuid().optional().nullable(),
+  parent_account_id: z.string().uuid().optional().nullable(),
+  asset_ref: z.string().uuid().optional().nullable(),
+  img_url: z.string().url().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  total_in: z.number().optional(),
+  total_out: z.number().optional(),
 });
 export type CreateAccountInput = z.infer<typeof CreateAccountSchema>;
 
