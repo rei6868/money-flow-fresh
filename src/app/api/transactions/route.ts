@@ -1,33 +1,46 @@
-import { sql } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import { TransactionTypeSchema, TransactionStatusSchema } from '@/lib/validation';
+import { sql } from '@/lib/db';
+import { CreateTransactionSchema } from '@/lib/transactions';
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get('account_id');
+    const personId = searchParams.get('person_id');
     const type = searchParams.get('type');
     const status = searchParams.get('status');
-    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const category = searchParams.get('category');
+    const dateFrom = searchParams.get('date_from');
+    const dateTo = searchParams.get('date_to');
+    const limit = parseInt(searchParams.get('limit') || '20', 10);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
-    const fromDate = searchParams.get('from_date');
-    const toDate = searchParams.get('to_date');
-    const personId = searchParams.get('person_id');
 
     const conditions: any[] = [];
     if (accountId) conditions.push(sql`account_id = ${accountId}`);
     if (personId) conditions.push(sql`person_id = ${personId}`);
     if (type) conditions.push(sql`type = ${type}`);
     if (status) conditions.push(sql`status = ${status}`);
-    if (fromDate) conditions.push(sql`occurred_on >= ${fromDate}`);
-    if (toDate) conditions.push(sql`occurred_on <= ${toDate}`);
+    if (category) conditions.push(sql`category_id = (SELECT category_id FROM categories WHERE name = ${category})`);
+    if (dateFrom) conditions.push(sql`occurred_on >= ${dateFrom}`);
+    if (dateTo) conditions.push(sql`occurred_on <= ${dateTo}`);
 
     const whereClause = conditions.length > 0 ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}` : sql``;
 
     const [data, countResult] = await Promise.all([
       sql`
-        SELECT * FROM transactions
+        SELECT
+          transaction_id as id,
+          account_id,
+          person_id,
+          type,
+          amount,
+          (SELECT name FROM categories WHERE category_id = transactions.category_id) as category,
+          notes as description,
+          occurred_on as transaction_date,
+          status,
+          created_at,
+          updated_at
+        FROM transactions
         ${whereClause}
         ORDER BY occurred_on DESC
         LIMIT ${limit} OFFSET ${offset}
@@ -38,8 +51,7 @@ export async function GET(request: NextRequest) {
       `
     ]);
 
-    const count = countResult[0] as { count: string };
-    const total = parseInt(count?.count || '0', 10);
+    const total = parseInt(countResult[0]?.count || '0', 10);
 
     return NextResponse.json({
       data,
@@ -59,23 +71,10 @@ export async function GET(request: NextRequest) {
   }
 }
 
-const CreateTransactionBodySchema = z.object({
-    accountId: z.string().uuid('Invalid account ID'),
-    personId: z.string().uuid().optional().nullable(),
-    type: TransactionTypeSchema,
-    amount: z.number().positive('Amount must be positive'),
-    category: z.string().optional().nullable(),
-    description: z.string().optional().nullable(),
-    transactionDate: z.string().refine((val) => /^\d{4}-\d{2}-\d{2}$/.test(val), {
-      message: "Invalid date format, expected YYYY-MM-DD",
-    }),
-    status: TransactionStatusSchema.default('active'),
-  });
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const validation = CreateTransactionBodySchema.safeParse(body);
+    const validation = CreateTransactionSchema.safeParse(body);
 
     if (!validation.success) {
       return NextResponse.json({ error: 'Validation failed', details: validation.error.flatten() }, { status: 400 });
@@ -83,23 +82,21 @@ export async function POST(request: NextRequest) {
 
     const { accountId, personId, type, amount, category, description, transactionDate, status } = validation.data;
 
-    // Mapping to snake_case
-    const account_id = accountId;
-    const person_id = personId;
-    const occurred_on = transactionDate;
-    const notes = description;
-
-    // Check if account exists
-    const accountResult = await sql`SELECT * FROM accounts WHERE account_id = ${account_id}`;
-    if (accountResult.length === 0) {
-      return NextResponse.json({ error: 'Account not found' }, { status: 404 });
-    }
-
-    // Insert transaction
     const newTransactionResult = await sql`
-      INSERT INTO transactions (account_id, person_id, type, amount, category, notes, occurred_on, status)
-      VALUES (${account_id}, ${person_id}, ${type}, ${amount}, ${category}, ${notes}, ${occurred_on}, ${status})
-      RETURNING *
+      INSERT INTO transactions (account_id, person_id, type, amount, category_id, notes, occurred_on, status)
+      VALUES (${accountId}, ${personId}, ${type}, ${amount}, (SELECT category_id FROM categories WHERE name = ${category}), ${description}, ${transactionDate}, ${status})
+      RETURNING
+        transaction_id as id,
+        account_id,
+        person_id,
+        type,
+        amount,
+        (SELECT name FROM categories WHERE category_id = transactions.category_id) as category,
+        notes as description,
+        occurred_on as transaction_date,
+        status,
+        created_at,
+        updated_at;
     `;
     const newTransaction = newTransactionResult[0];
 
@@ -108,7 +105,7 @@ export async function POST(request: NextRequest) {
     await sql`
       UPDATE accounts
       SET current_balance = current_balance + ${balanceUpdate}
-      WHERE account_id = ${account_id}
+      WHERE account_id = ${accountId}
     `;
 
     return NextResponse.json(newTransaction, { status: 201 });

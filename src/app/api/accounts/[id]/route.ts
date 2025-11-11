@@ -1,112 +1,52 @@
+import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { z } from 'zod';
-import { CreateAccountSchema } from '@/lib/validation';
-import { NextRequest } from 'next/server';
-import { Account } from '@/types/database';
-
-const UpdateAccountSchema = CreateAccountSchema.partial();
-
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-
-    const result = await sql`
-      SELECT * FROM accounts WHERE account_id = ${id}
-    `;
-    const account = result[0] as Account;
-
-
-    if (!account) {
-      return Response.json(
-        { error: 'Account not found' },
-        { status: 404 }
-      );
-    }
-
-    await sql`
-      UPDATE accounts SET status = 'closed', updated_at = NOW() WHERE account_id = ${id}
-    `;
-
-    return Response.json({ success: true, message: 'Account closed' });
-
-  } catch (error) {
-    console.error('[DELETE /api/accounts/[id]]', error);
-    return Response.json(
-      { error: 'Failed to delete account' },
-      { status: 500 }
-    );
-  }
-}
+import { UpdateAccountSchema } from '@/lib/accounts';
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const body = await request.json();
     const { id } = await params;
+    const body = await request.json();
+    const validation = UpdateAccountSchema.safeParse(body);
 
-    // Validate input
-    const validInput = UpdateAccountSchema.parse(body);
-
-    const oldAccountResult = await sql`
-      SELECT * FROM accounts WHERE account_id = ${id}
-    `;
-    const oldAccount = oldAccountResult[0] as Account;
-
-    if (!oldAccount) {
-      return Response.json(
-        { error: 'Account not found' },
-        { status: 404 }
-      );
+    if (!validation.success) {
+      return NextResponse.json({ error: 'Validation failed', details: validation.error.flatten() }, { status: 400 });
     }
 
-    const updates: { [key: string]: any } = {};
-    for (const key in validInput) {
-        if (Object.prototype.hasOwnProperty.call(validInput, key)) {
-            const value = validInput[key as keyof typeof validInput];
-            if (value !== undefined) {
-                updates[key] = value;
-            }
-        }
+    const { accountName, accountType, currency, currentBalance } = validation.data;
+
+    const originalAccountResult = await sql`SELECT * FROM accounts WHERE account_id = ${id}`;
+    if (originalAccountResult.length === 0) {
+      return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
 
-    if (Object.keys(updates).length === 0) {
-      return Response.json(
-        { message: 'No fields to update', account: oldAccount },
-        { status: 200 }
-      );
-    }
-
-    const setClauses = Object.entries(updates).map(
-      ([key, value]) => sql`${sql.unsafe(key)} = ${value}`
-    );
+    const updateFields: any[] = [];
+    if (accountName) updateFields.push(sql`account_name = ${accountName}`);
+    if (accountType) updateFields.push(sql`account_type = ${accountType}`);
+    if (currency) updateFields.push(sql`currency = ${currency}`);
+    if (currentBalance) updateFields.push(sql`current_balance = ${currentBalance}`);
 
     const updatedAccountResult = await sql`
       UPDATE accounts
-      SET ${(sql as any).join(setClauses, sql`, `)}, updated_at = NOW()
+      SET ${(sql as any).join(updateFields, sql`, `)}
       WHERE account_id = ${id}
-      RETURNING *
+      RETURNING
+        account_id as id,
+        account_name,
+        account_type,
+        current_balance,
+        currency,
+        status,
+        created_at,
+        updated_at;
     `;
+    const updatedAccount = updatedAccountResult[0];
 
-    const updatedAccount = updatedAccountResult[0] as Account;
-
-    return Response.json(updatedAccount);
-
+    return NextResponse.json(updatedAccount);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-        return Response.json(
-            { error: 'Validation failed', details: error.flatten() },
-            { status: 400 }
-        );
-    }
-    console.error('[PATCH /api/accounts/[id]]', error);
-    return Response.json(
-      { error: 'Failed to update account' },
-      { status: 500 }
-    );
+    console.error('[PATCH /api/accounts/:id]', error);
+    return NextResponse.json({ error: 'Failed to update account' }, { status: 500 });
   }
 }
