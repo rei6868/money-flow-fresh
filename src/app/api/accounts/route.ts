@@ -88,7 +88,7 @@ export async function POST(request: Request) {
         accountType,
         openingBalance,
         currentBalance,
-        currency,
+        currency || null,
         status,
         ownerId,
         parentAccountId,
