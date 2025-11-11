@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 
       // Get total count
       const countQuery = `SELECT COUNT(*) as count FROM accounts ${whereClause}`;
-      const countResult = await queryOne(countQuery, params);
+      const countResult = (await queryOne(countQuery, params)) as { count: string };
       const total = parseInt(countResult?.count || '0', 10);
 
       // Get paginated data
