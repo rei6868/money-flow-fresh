@@ -33,18 +33,19 @@ export const CreatePersonSchema = z.object({
 export type CreatePersonInput = z.infer<typeof CreatePersonSchema>;
 
 export const CreateAccountSchema = z.object({
-  account_name: z.string().min(1, 'Account name is required').max(120, 'Account name must be 120 characters or less'),
-  account_type: AccountTypeSchema,
-  opening_balance: z.number(),
-  current_balance: z.number(),
+  accountName: z.string().min(1, 'Account name is required').max(120, 'Account name must be 120 characters or less'),
+  accountType: AccountTypeSchema,
+  openingBalance: z.number(),
+  currentBalance: z.number(),
+  currency: z.string().optional(),
   status: AccountStatusSchema.default('active'),
-  owner_id: z.string().uuid().optional().nullable(),
-  parent_account_id: z.string().uuid().optional().nullable(),
-  asset_ref: z.string().uuid().optional().nullable(),
-  img_url: z.string().url().optional().nullable(),
+  ownerId: z.string().uuid().optional().nullable(),
+  parentAccountId: z.string().uuid().optional().nullable(),
+  assetRef: z.string().uuid().optional().nullable(),
+  imgUrl: z.string().url().optional().nullable(),
   notes: z.string().optional().nullable(),
-  total_in: z.number().optional(),
-  total_out: z.number().optional(),
+  totalIn: z.number().optional(),
+  totalOut: z.number().optional(),
 });
 export type CreateAccountInput = z.infer<typeof CreateAccountSchema>;
 
