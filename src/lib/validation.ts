@@ -54,7 +54,7 @@ export const CreateTransactionSchema = z.object({
   amount: z.number().positive('Amount must be positive'),
   fee: z.number().nonnegative().optional(),
   occurred_on: z.string().refine((val) => /^\d{4}-\d{2}-\d{2}$/.test(val), {
-    message: "Invalid date format, expected YYYY-DD-MM",
+    message: "Invalid date format, expected YYYY-MM-DD",
   }),
   notes: z.string().optional(),
   person_id: z.string().uuid().optional(),

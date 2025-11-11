@@ -1,18 +1,19 @@
 import { queryOne, execute } from '@/lib/db';
 import { z } from 'zod';
 import { CreateAccountSchema } from '@/lib/validation';
+import { NextRequest } from 'next/server';
+import { Account } from '@/types/database';
 
 const UpdateAccountSchema = CreateAccountSchema.partial();
 
 export async function DELETE(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const resolvedParams = await params;
-    const { id } = resolvedParams;
+    const { id } = await params;
 
-    const account = await queryOne(
+    const account = await queryOne<Account>(
       'SELECT * FROM accounts WHERE account_id = $1',
       [id]
     );
@@ -42,19 +43,18 @@ export async function DELETE(
 }
 
 export async function PATCH(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const body = await request.json();
-    const resolvedParams = await params;
-    const { id } = resolvedParams;
+    const { id } = await params;
 
     // Validate input
     const validInput = UpdateAccountSchema.parse(body);
 
     // 1. GET old account
-    const oldAccount = await queryOne(
+    const oldAccount = await queryOne<Account>(
       'SELECT * FROM accounts WHERE account_id = $1',
       [id]
     );

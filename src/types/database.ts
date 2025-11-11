@@ -56,39 +56,24 @@ export interface Person {
     updated_at: Date;
 }
 
+export type AccountStatus = 'active' | 'inactive' | 'closed' | 'suspended';
+
 export interface Account {
-    /**
-     * Unique identifier for the account (UUID)
-     */
     account_id: string;
-    /**
-     * Foreign key linking to the Person table
-     */
-    person_id: string;
-    /**
-     * Name of the account
-     */
     account_name: string;
-    /**
-     * Type of the account
-     */
+    img_url: string | null;
     account_type: AccountType;
-    /**
-     * Currency of the account (default: VND)
-     */
-    currency: string;
-    /**
-     * Status of the account
-     */
-    status: 'active' | 'inactive' | 'closed' | 'suspended';
-    /**
-     * Timestamp of when the account was created
-     */
+    owner_id: string | null;
+    parent_account_id: string | null;
+    asset_ref: string | null;
+    opening_balance: number;
+    current_balance: number;
+    status: AccountStatus;
+    total_in: number;
+    total_out: number;
     created_at: Date;
-    /**
-     * Timestamp of when the account was last updated
-     */
     updated_at: Date;
+    notes: string | null;
 }
 
 export interface Transaction {

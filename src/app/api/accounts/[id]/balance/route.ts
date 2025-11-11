@@ -1,15 +1,16 @@
 import { queryOne } from '@/lib/db';
+import { NextRequest } from 'next/server';
+import { Account } from '@/types/database';
 
 export async function GET(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const resolvedParams = await params;
-    const { id } = resolvedParams;
+    const { id } = await params;
 
     // 1. GET account
-    const account = await queryOne(
+    const account = await queryOne<Account>(
       'SELECT * FROM accounts WHERE account_id = $1',
       [id]
     );
