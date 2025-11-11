@@ -11,9 +11,10 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
-    "next": "16.0.1",
+    "next": "latest",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "yarn": "^1.22.22",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -25,6 +26,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
+    "patch-package": "^8.0.1",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
