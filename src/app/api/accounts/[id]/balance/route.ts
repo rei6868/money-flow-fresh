@@ -10,15 +10,21 @@ export async function GET(
 
     const account = await sql`
       SELECT
-        account_id,
-        current_balance,
-        currency,
-        total_in as total_income,
-        total_out as total_expense,
-        status,
-        updated_at as last_updated
-      FROM accounts
-      WHERE account_id = ${id}
+        a.account_id,
+        a.current_balance,
+        'VND' AS currency,
+        a.status,
+        a.updated_at AS last_updated,
+        COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) AS total_income,
+        COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) AS total_expense
+      FROM
+        accounts a
+      LEFT JOIN
+        transactions t ON a.account_id = t.account_id
+      WHERE
+        a.account_id = ${id}
+      GROUP BY
+        a.account_id
     `;
 
     if (account.length === 0) {
