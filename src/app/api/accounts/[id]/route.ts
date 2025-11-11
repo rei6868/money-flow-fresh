@@ -1,4 +1,4 @@
-import { queryOne, execute } from '@/lib/db';
+import { sql } from '@/lib/db';
 import { z } from 'zod';
 import { CreateAccountSchema } from '@/lib/validation';
 import { NextRequest } from 'next/server';
@@ -13,10 +13,11 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    const account = await queryOne<Account>(
-      'SELECT * FROM accounts WHERE account_id = $1',
-      [id]
-    );
+    const result = await sql`
+      SELECT * FROM accounts WHERE account_id = ${id}
+    `;
+    const account = result[0] as Account;
+
 
     if (!account) {
       return Response.json(
@@ -25,11 +26,9 @@ export async function DELETE(
       );
     }
 
-    // Soft delete: set status to closed
-    await execute(
-      'UPDATE accounts SET status = $1, updated_at = NOW() WHERE account_id = $2',
-      ['closed', id]
-    );
+    await sql`
+      UPDATE accounts SET status = 'closed', updated_at = NOW() WHERE account_id = ${id}
+    `;
 
     return Response.json({ success: true, message: 'Account closed' });
 
@@ -53,11 +52,10 @@ export async function PATCH(
     // Validate input
     const validInput = UpdateAccountSchema.parse(body);
 
-    // 1. GET old account
-    const oldAccount = await queryOne<Account>(
-      'SELECT * FROM accounts WHERE account_id = $1',
-      [id]
-    );
+    const oldAccountResult = await sql`
+      SELECT * FROM accounts WHERE account_id = ${id}
+    `;
+    const oldAccount = oldAccountResult[0] as Account;
 
     if (!oldAccount) {
       return Response.json(
@@ -66,35 +64,35 @@ export async function PATCH(
       );
     }
 
-    // 2. BUILD dynamic UPDATE
-    const updateFields: string[] = [];
-    const updateParams: any[] = [];
-    let paramIndex = 1;
-
-    // Update only provided fields
+    const updates: { [key: string]: any } = {};
     for (const key in validInput) {
         if (Object.prototype.hasOwnProperty.call(validInput, key)) {
             const value = validInput[key as keyof typeof validInput];
             if (value !== undefined) {
-                updateFields.push(`${key} = $${paramIndex++}`);
-                updateParams.push(value);
+                updates[key] = value;
             }
         }
     }
 
-
-    if (updateFields.length === 0) {
+    if (Object.keys(updates).length === 0) {
       return Response.json(
         { message: 'No fields to update', account: oldAccount },
         { status: 200 }
       );
     }
 
-    updateFields.push(`updated_at = NOW()`);
-    updateParams.push(id);
+    const setClauses = Object.entries(updates).map(
+      ([key, value]) => sql`${sql.unsafe(key)} = ${value}`
+    );
 
-    const updateQuery = `UPDATE accounts SET ${updateFields.join(', ')} WHERE account_id = $${paramIndex} RETURNING *`;
-    const updatedAccount = await queryOne(updateQuery, updateParams);
+    const updatedAccountResult = await sql`
+      UPDATE accounts
+      SET ${(sql as any).join(setClauses, sql`, `)}, updated_at = NOW()
+      WHERE account_id = ${id}
+      RETURNING *
+    `;
+
+    const updatedAccount = updatedAccountResult[0] as Account;
 
     return Response.json(updatedAccount);
 

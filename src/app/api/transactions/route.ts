@@ -1,6 +1,7 @@
-import { queryMany, queryOne } from '@/lib/db';
+import { sql } from '@/lib/db';
+import { NextRequest } from 'next/server';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get('account_id');
@@ -12,58 +13,35 @@ export async function GET(request: Request) {
     const toDate = searchParams.get('to_date');
     const personId = searchParams.get('person_id');
 
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
+    const conditions: any[] = [];
+    if (accountId) conditions.push(sql`account_id = ${accountId}`);
+    if (personId) conditions.push(sql`person_id = ${personId}`);
+    if (type) conditions.push(sql`type = ${type}`);
+    if (status) conditions.push(sql`status = ${status}`);
+    if (fromDate) conditions.push(sql`occurred_on >= ${fromDate}`);
+    if (toDate) conditions.push(sql`occurred_on <= ${toDate}`);
 
-    if (accountId) {
-      conditions.push(`account_id = $${paramIndex++}`);
-      params.push(accountId);
-    }
+    const whereClause = conditions.length > 0 ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}` : sql``;
 
-    if (personId) {
-      conditions.push(`person_id = $${paramIndex++}`);
-      params.push(personId);
-    }
+    const [data, countResult] = await Promise.all([
+      sql`
+        SELECT * FROM transactions
+        ${whereClause}
+        ORDER BY occurred_on DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+      sql`
+        SELECT COUNT(*) as count FROM transactions
+        ${whereClause}
+      `
+    ]);
 
-    if (type) {
-      conditions.push(`type = $${paramIndex++}`);
-      params.push(type);
-    }
-
-    if (status) {
-      conditions.push(`status = $${paramIndex++}`);
-      params.push(status);
-    }
-
-    if (fromDate) {
-      conditions.push(`occurred_on >= $${paramIndex++}`);
-      params.push(fromDate);
-    }
-
-    if (toDate) {
-      conditions.push(`occurred_on <= $${paramIndex++}`);
-      params.push(toDate);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    const dataQuery = `
-      SELECT * FROM transactions
-      ${whereClause}
-      ORDER BY occurred_on DESC
-      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
-    `;
-    const dataParams = [...params, limit, offset];
-
-    const countQuery = `SELECT COUNT(*) as count FROM transactions ${whereClause}`;
-
-    const data = await queryMany(dataQuery, dataParams);
-    const countResult = await queryOne<{count: string}>(countQuery, params);
+    const count = countResult[0] as { count: string };
+    const total = parseInt(count?.count || '0', 10);
 
     return Response.json({
       data,
-      total: parseInt(countResult?.count || '0', 10),
+      total,
       page: Math.floor(offset / limit) + 1,
       limit,
     });
