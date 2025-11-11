@@ -1,6 +1,5 @@
 import { queryOne } from '@/lib/db';
 import { NextRequest } from 'next/server';
-import { Account } from '@/types/database';
 
 export async function GET(
   request: NextRequest,
@@ -9,36 +8,48 @@ export async function GET(
   try {
     const { id } = await params;
 
-    // 1. GET account
-    const account = await queryOne<Account>(
-      'SELECT * FROM accounts WHERE account_id = $1',
+    const account = await queryOne<{
+      account_id: string;
+      current_balance: number;
+      currency: string;
+      status: string;
+      updated_at: string;
+    }>(
+      'SELECT account_id, current_balance, currency, status, updated_at FROM accounts WHERE account_id = $1',
       [id]
     );
 
     if (!account) {
-      return Response.json(
-        { error: 'Account not found' },
-        { status: 404 }
-      );
+      return Response.json({ error: 'Account not found' }, { status: 404 });
     }
 
-    // 2. RETURN balance info
+    const incomeResult = await queryOne<{ total_income: string }>(
+      "SELECT COALESCE(SUM(amount), 0) as total_income FROM transactions WHERE account_id = $1 AND type = 'income' AND deleted_at IS NULL",
+      [id]
+    );
+
+    const expenseResult = await queryOne<{ total_expense: string }>(
+      "SELECT COALESCE(SUM(amount), 0) as total_expense FROM transactions WHERE account_id = $1 AND type = 'expense' AND deleted_at IS NULL",
+      [id]
+    );
+
+    const totalIncome = parseFloat(incomeResult?.total_income || '0');
+    const totalExpense = parseFloat(expenseResult?.total_expense || '0');
+
     return Response.json({
-      account_id: id,
-      account_name: account.account_name,
-      account_type: account.account_type,
-      opening_balance: account.opening_balance,
-      current_balance: account.current_balance,
-      total_in: account.total_in,
-      total_out: account.total_out,
+      accountId: account.account_id,
+      currentBalance: account.current_balance,
+      currency: account.currency,
+      totalIncome,
+      totalExpense,
       status: account.status,
-      as_of_date: new Date().toISOString().split('T')[0]
+      lastUpdated: account.updated_at,
     });
 
   } catch (error) {
-    console.error('[GET /api/accounts/[id]/balance]', error);
+    console.error(`[GET /api/accounts/${(await (params as any))?.id}/balance]`, error);
     return Response.json(
-      { error: 'Failed to fetch balance' },
+      { error: 'Failed to fetch account balance' },
       { status: 500 }
     );
   }
