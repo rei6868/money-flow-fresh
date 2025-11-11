@@ -1,4 +1,4 @@
-import { queryMany, queryOne, sql } from '@/lib/db';
+import { sql } from '@/lib/db';
 import { ApiUpdateTransactionSchema } from '@/lib/validation';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
@@ -10,19 +10,17 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const transaction = await queryOne(
-      'SELECT * FROM transactions WHERE transaction_id = $1 AND deleted_at IS NULL',
-      [id]
-    );
+    const [transaction] = await sql`
+      SELECT * FROM transactions WHERE transaction_id = ${id} AND deleted_at IS NULL
+    `;
 
     if (!transaction) {
       return Response.json({ error: 'Transaction not found' }, { status: 404 });
     }
 
-    const transactionHistory = await queryMany(
-      'SELECT * FROM transaction_history WHERE transaction_id = $1 ORDER BY "changedAt" DESC',
-      [id]
-    );
+    const transactionHistory = await sql`
+      SELECT * FROM transaction_history WHERE transaction_id = ${id} ORDER BY "changedAt" DESC
+    `;
 
     return Response.json({
       transaction,
@@ -55,20 +53,16 @@ export async function PATCH(
 
     const { type, amount, category, description, status } = validation.data;
 
-    const originalTransaction = await queryOne<{
-      account_id: string;
-      amount: number;
-      type: string;
-    }>(
-      'SELECT account_id, amount, type FROM transactions WHERE transaction_id = $1 AND deleted_at IS NULL',
-      [id]
-    );
+    const originalTransactionResult = await sql`
+      SELECT account_id, amount, type FROM transactions WHERE transaction_id = ${id} AND deleted_at IS NULL
+    `;
+    const originalTransaction = originalTransactionResult[0] as { account_id: string; amount: number; type: string; };
+
 
     if (!originalTransaction) {
       return Response.json({ error: 'Transaction not found' }, { status: 404 });
     }
 
-    // Recalculate balance if amount or type changes
     if (amount !== undefined || type !== undefined) {
       const oldAmount = originalTransaction.amount;
       const oldType = originalTransaction.type;
@@ -83,10 +77,9 @@ export async function PATCH(
       const balanceDifference = newBalanceEffect - oldBalanceEffect;
 
       if (balanceDifference !== 0) {
-        await sql(
-          'UPDATE accounts SET current_balance = current_balance + $1 WHERE account_id = $2',
-          [balanceDifference, accountId]
-        );
+        await sql`
+          UPDATE accounts SET current_balance = current_balance + ${balanceDifference} WHERE account_id = ${accountId}
+        `;
       }
     }
 
@@ -98,23 +91,21 @@ export async function PATCH(
     if (status) updates.status = status;
 
     const updateFields = Object.keys(updates);
-    if (updateFields.length === 0) {
-      return Response.json({ message: 'No fields to update' }, { status: 200 });
+    if (updateFields.length > 0) {
+      const setClauses = Object.entries(updates).map(
+        ([key, value]) => sql`${sql.unsafe(key)} = ${value}`
+      );
+
+      await sql`
+        UPDATE transactions
+        SET ${(sql as any).join(setClauses, sql`, `)}, updated_at = NOW()
+        WHERE transaction_id = ${id}
+      `;
     }
-
-    const setClause = updateFields
-      .map((field, index) => `${field} = $${index + 2}`)
-      .join(', ');
-    const queryParams = [...Object.values(updates), id];
-
-    await sql(
-      `UPDATE transactions SET ${setClause}, updated_at = NOW() WHERE transaction_id = $1`,
-      queryParams
-    );
 
     return Response.json({
       id,
-      updatedFields: updateFields.map(f => f === 'category_id' ? 'category' : (f === 'notes' ? 'description' : f)),
+      updatedFields: Object.keys(validation.data),
       newValues: validation.data,
     }, { status: 200 });
 
@@ -137,32 +128,24 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    const transaction = await queryOne<{
-      account_id: string;
-      amount: number;
-      type: string;
-    }>(
-      'SELECT account_id, amount, type FROM transactions WHERE transaction_id = $1 AND deleted_at IS NULL',
-      [id]
-    );
+    const transactionResult = await sql`
+      SELECT account_id, amount, type FROM transactions WHERE transaction_id = ${id} AND deleted_at IS NULL
+    `;
+    const transaction = transactionResult[0] as { account_id: string; amount: number; type: string; };
 
     if (!transaction) {
       return Response.json({ error: 'Transaction not found or already deleted' }, { status: 404 });
     }
 
-    // Soft delete the transaction
-    await sql(
-      "UPDATE transactions SET deleted_at = NOW(), status = 'void' WHERE transaction_id = $1",
-      [id]
-    );
+    await sql`
+      UPDATE transactions SET deleted_at = NOW(), status = 'void' WHERE transaction_id = ${id}
+    `;
 
-    // Reverse the transaction's impact on the account balance
     const balanceChange = transaction.type === 'income' ? -transaction.amount : transaction.amount;
 
-    await sql(
-      'UPDATE accounts SET current_balance = current_balance + $1 WHERE account_id = $2',
-      [balanceChange, transaction.account_id]
-    );
+    await sql`
+      UPDATE accounts SET current_balance = current_balance + ${balanceChange} WHERE account_id = ${transaction.account_id}
+    `;
 
     return Response.json({
       message: 'Transaction deleted successfully',

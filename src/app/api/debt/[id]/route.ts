@@ -1,4 +1,4 @@
-import { queryOne, sql } from '@/lib/db';
+import { sql } from '@/lib/db';
 import { ApiUpdateDebtSchema } from '@/lib/validation';
 import { randomUUID } from 'crypto';
 import { NextRequest } from 'next/server';
@@ -31,34 +31,35 @@ export async function PATCH(
       return Response.json({ message: 'No fields to update' }, { status: 200 });
     }
 
-    // If status is 'settled', create a debt_movement record
     if (status === 'settled') {
-      const debt = await queryOne<{ debtor_account_id: string, creditor_person_id: string, amount: number }>(
-        'SELECT debtor_account_id, creditor_person_id, amount FROM debt_ledger WHERE debt_ledger_id = $1',
-        [id]
-      );
+      const debtResult = await sql`
+        SELECT debtor_account_id, creditor_person_id, amount FROM debt_ledger WHERE debt_ledger_id = ${id}
+      `;
+      const debt = debtResult[0] as { debtor_account_id: string, creditor_person_id: string, amount: number };
 
       if (debt) {
-        await sql(
-          `INSERT INTO debt_movements (debt_movement_id, person_id, account_id, movement_type, amount, status)
-           VALUES ($1, $2, $3, 'repay', $4, 'settled')`,
-          [randomUUID(), debt.creditor_person_id, debt.debtor_account_id, debt.amount]
-        );
+        await sql`
+          INSERT INTO debt_movements (debt_movement_id, person_id, account_id, movement_type, amount, status)
+          VALUES (${randomUUID()}, ${debt.creditor_person_id}, ${debt.debtor_account_id}, 'repay', ${debt.amount}, 'settled')
+        `;
       }
     }
 
-    const setClause = updateFields
-      .map((field, index) => `${field} = $${index + 2}`)
-      .join(', ');
-    const queryParams = [id, ...Object.values(updates)];
+    const setClauses = Object.entries(updates).map(
+      ([key, value]) => sql`${sql.unsafe(key)} = ${value}`
+    );
 
-    const updatedDebt = await queryOne(
-      `UPDATE debt_ledger SET ${setClause}, updated_at = NOW() WHERE debt_ledger_id = $1 RETURNING
+    const result = await sql`
+      UPDATE debt_ledger
+      SET ${(sql as any).join(setClauses, sql`, `)}, updated_at = NOW()
+      WHERE debt_ledger_id = ${id}
+      RETURNING
         debt_ledger_id as "debtId",
         amount,
-        status`,
-      queryParams
-    );
+        status
+    `;
+
+    const updatedDebt = result[0];
 
     if (!updatedDebt) {
       return Response.json({ error: 'Debt record not found' }, { status: 404 });
@@ -66,7 +67,7 @@ export async function PATCH(
 
     return Response.json({
       debtId: id,
-      updatedFields,
+      updatedFields: Object.keys(validation.data),
       debt: updatedDebt,
     }, { status: 200 });
 

@@ -1,4 +1,4 @@
-import { queryOne, sql } from '@/lib/db';
+import { sql } from '@/lib/db';
 import { ApiUpdateAccountSchema } from '@/lib/validation';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
@@ -31,15 +31,18 @@ export async function PATCH(
       return Response.json({ message: 'No fields to update' }, { status: 200 });
     }
 
-    const setClause = updateFields
-      .map((field, index) => `${field} = $${index + 2}`)
-      .join(', ');
-    const queryParams = [id, ...Object.values(updates)];
-
-    const updatedAccount = await queryOne(
-      `UPDATE accounts SET ${setClause}, updated_at = NOW() WHERE account_id = $1 RETURNING *`,
-      queryParams
+    const setClauses = Object.entries(updates).map(
+      ([key, value]) => sql`${sql.unsafe(key)} = ${value}`
     );
+
+    const result = await sql`
+      UPDATE accounts
+      SET ${(sql as any).join(setClauses, sql`, `)}, updated_at = NOW()
+      WHERE account_id = ${id}
+      RETURNING *
+    `;
+
+    const updatedAccount = result[0];
 
     if (!updatedAccount) {
       return Response.json({ error: 'Account not found' }, { status: 404 });
@@ -47,7 +50,7 @@ export async function PATCH(
 
     return Response.json({
       accountId: id,
-      updatedFields: updateFields,
+      updatedFields: Object.keys(validation.data),
       account: updatedAccount,
     }, { status: 200 });
 
@@ -70,11 +73,10 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    // Optional: Check for related transactions before deleting
-    const relatedTransactions = await queryOne<{ count: string }>(
-      'SELECT COUNT(*) as count FROM transactions WHERE account_id = $1 AND deleted_at IS NULL',
-      [id]
-    );
+    const relatedTransactionsResult = await sql`
+      SELECT COUNT(*) as count FROM transactions WHERE account_id = ${id} AND deleted_at IS NULL
+    `;
+    const relatedTransactions = relatedTransactionsResult[0] as { count: string };
 
     if (parseInt(relatedTransactions?.count || '0', 10) > 0) {
       return Response.json(
@@ -83,13 +85,14 @@ export async function DELETE(
       );
     }
 
-    // Soft delete the account
-    const result = await sql(
-      "UPDATE accounts SET deleted_at = NOW(), status = 'closed' WHERE account_id = $1",
-      [id]
-    );
+    const result = await sql`
+      UPDATE accounts
+      SET deleted_at = NOW(), status = 'closed'
+      WHERE account_id = ${id}
+      RETURNING account_id
+    `;
 
-    if ((result as any).rowCount === 0) {
+    if (result.length === 0) {
         return Response.json({ error: 'Account not found or already deleted' }, { status: 404 });
     }
 

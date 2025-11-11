@@ -1,4 +1,4 @@
-import { queryMany, queryOne, sql } from '@/lib/db';
+import { sql } from '@/lib/db';
 import { ApiCreateTransactionSchema, GetTransactionsQuerySchema } from '@/lib/validation';
 import { randomUUID } from 'crypto';
 import { NextRequest } from 'next/server';
@@ -30,60 +30,32 @@ export async function GET(request: NextRequest) {
       offset,
     } = validation.data;
 
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
+    const conditions: any[] = [];
+    if (account_id) conditions.push(sql`account_id = ${account_id}`);
+    if (person_id) conditions.push(sql`person_id = ${person_id}`);
+    if (type) conditions.push(sql`type = ${type}`);
+    if (status) conditions.push(sql`status = ${status}`);
+    if (category) conditions.push(sql`category_id = ${category}`);
+    if (date_from) conditions.push(sql`occurred_on >= ${date_from}`);
+    if (date_to) conditions.push(sql`occurred_on <= ${date_to}`);
 
-    if (account_id) {
-      conditions.push(`account_id = $${paramIndex++}`);
-      params.push(account_id);
-    }
+    const whereClause = conditions.length > 0 ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}` : sql``;
 
-    if (person_id) {
-      conditions.push(`person_id = $${paramIndex++}`);
-      params.push(person_id);
-    }
+    const [data, countResult] = await Promise.all([
+      sql`
+        SELECT * FROM transactions
+        ${whereClause}
+        ORDER BY occurred_on DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+      sql`
+        SELECT COUNT(*) as count FROM transactions
+        ${whereClause}
+      `
+    ]);
 
-    if (type) {
-      conditions.push(`type = $${paramIndex++}`);
-      params.push(type);
-    }
-
-    if (status) {
-      conditions.push(`status = $${paramIndex++}`);
-      params.push(status);
-    }
-
-    if (category) {
-        conditions.push(`category_id = $${paramIndex++}`);
-        params.push(category);
-    }
-
-    if (date_from) {
-      conditions.push(`occurred_on >= $${paramIndex++}`);
-      params.push(date_from);
-    }
-
-    if (date_to) {
-      conditions.push(`occurred_on <= $${paramIndex++}`);
-      params.push(date_to);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    const dataQuery = `
-      SELECT * FROM transactions
-      ${whereClause}
-      ORDER BY occurred_on DESC
-      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
-    `;
-    const dataParams = [...params, limit, offset];
-
-    const countQuery = `SELECT COUNT(*) as count FROM transactions ${whereClause}`;
-
-    const data = await queryMany(dataQuery, dataParams);
-    const countResult = await queryOne<{count: string}>(countQuery, params);
-    const total = parseInt(countResult?.count || '0', 10);
+    const count = countResult[0] as { count: string };
+    const total = parseInt(count?.count || '0', 10);
 
     return Response.json({
       data,
@@ -126,11 +98,10 @@ export async function POST(request: NextRequest) {
       status,
     } = validation.data;
 
-    // Check if account exists
-    const account = await queryOne<{ account_id: string; current_balance: number }>(
-      'SELECT account_id, current_balance FROM accounts WHERE account_id = $1',
-      [accountId]
-    );
+    const accountResult = await sql`
+      SELECT account_id, current_balance FROM accounts WHERE account_id = ${accountId}
+    `;
+    const account = accountResult[0] as { account_id: string; current_balance: number };
 
     if (!account) {
       return Response.json({ error: 'Account not found' }, { status: 404 });
@@ -138,31 +109,18 @@ export async function POST(request: NextRequest) {
 
     const newTransactionId = randomUUID();
 
-    // Insert new transaction
-    const newTransaction = await queryOne(
-      `INSERT INTO transactions (transaction_id, account_id, person_id, type, amount, category_id, notes, occurred_on, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *`,
-      [
-        newTransactionId,
-        accountId,
-        personId,
-        type,
-        amount,
-        category, // Assuming category string is stored in category_id for now
-        description,
-        transactionDate,
-        status,
-      ]
-    );
+    const result = await sql`
+      INSERT INTO transactions (transaction_id, account_id, person_id, type, amount, category_id, notes, occurred_on, status)
+      VALUES (${newTransactionId}, ${accountId}, ${personId}, ${type}, ${amount}, ${category}, ${description}, ${transactionDate}, ${status})
+      RETURNING *
+    `;
+    const newTransaction = result[0];
 
-    // Update account balance
     const balanceChange = type === 'income' ? amount : -amount;
 
-    await sql(
-      'UPDATE accounts SET current_balance = current_balance + $1 WHERE account_id = $2',
-      [balanceChange, accountId]
-    );
+    await sql`
+      UPDATE accounts SET current_balance = current_balance + ${balanceChange} WHERE account_id = ${accountId}
+    `;
 
     return Response.json(newTransaction, { status: 201 });
 
